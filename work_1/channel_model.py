@@ -18,8 +18,8 @@ def AWGN(signal, signal_to_noise_ratio):
 
 def tworay_channel(signal, delay_samples, alpha):
     
-    fs = 32.76e6
-    delay_smpls = int(30 * fs / 10e9)
+    #fs = 32.76e6
+    #delay_smpls = int(30 * fs / 10e9)
     signal = signal / np.sqrt(1 + alpha**2)
     delayed_signal = np.concatenate((np.zeros(delay_samples), signal[:-delay_samples])) * alpha / np.sqrt(1 + alpha**2)
     summ = signal + delayed_signal
