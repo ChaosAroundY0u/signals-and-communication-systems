@@ -50,9 +50,7 @@ symbols_count = 10
 cp_len = 64
 bits_count = N * symbols_count * 2  # QPSK => *2
 signal_to_noise_ratio = 15
-
 delay_spread = 1
-
 delta_f = 15e3 # Hz
 
 data_bits = np.random.randint(0, 2, bits_count)
