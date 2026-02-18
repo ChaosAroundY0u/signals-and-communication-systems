@@ -2,151 +2,273 @@ clear;
 close all;
 
 %% -----------------------Variables----------------------- %%
-Nfft = 1024;
-symbols_count = 2;
-cp_len = 72;
-delay_spread = 900;
-subcarrier_spacing = 15e3;
-bits_count = Nfft * symbols_count * 2;
-snr = 30;
-bits = randi([0, 1], 1, bits_count);
-velocity = 0.1 .* 3*10e8 * 1000/3600;
-carrier_freq = 3.5e9;
+Nfft =                                     1024;
+N_with_GI =                                792; % число поднесущих с учетом Guard Interval
+numSubcarrier =                            116;
+symbols_count =                            5;
+cp_len =                                   72;
+delay_spread =                             500;
+subcarrier_spacing =                       120e3;
+snr =                                      70;
+velocity =                                 0 * 1000/3600;
+carrier_freq =                             3.5e9;
+Fs =                                       Nfft * subcarrier_spacing;
 %% -----------------------Main part----------------------- %%
-%qpsk modulate
-qpsk_symbols = zeros(1, symbols_count .* Nfft);
-for i = 1:symbols_count
-    symbol = bits(i*2*Nfft-2*Nfft+1:i*2*Nfft);
-    modulated = qpsk_modulate(symbol);
-    qpsk_symbols([i.*Nfft-Nfft+1:i.*Nfft]) = modulated;
-end
-%pilot symbol
-pilot_symbol = qpsk_symbols(1:Nfft);
+
+pilot_symbol =                             bits_to_complex(1, Nfft, numSubcarrier, "QPSK");
+qam_symbols =                              bits_to_complex(symbols_count-1, Nfft, numSubcarrier, "16QAM");
+qam_symbols =                              [pilot_symbol, qam_symbols];
 
 %IFFT
-ifft_symbols = ifft(ifftshift(reshape(qpsk_symbols', [], symbols_count)'), [], 2);
+ifft_symbols =                             ifft(ifftshift(reshape(qam_symbols', [], symbols_count)'), [], 2);
 
 %CP Insert
-cp_ifft_symbols = [ifft_symbols(:, end-71:end), ifft_symbols]; % возможно стоит переделать потомушто долго прога работает
+cp_ifft_symbols =                          [ifft_symbols(:, end-71:end), ifft_symbols]; % возможно стоит переделать потомушто долго прога работает
 
 %through channel
-cp_ifft_symbols = reshape(cp_ifft_symbols', [], 1)'; %ravel
-[TDLa_signal, impulse_res, delays_sampl] = TDLa(cp_ifft_symbols, delay_spread, Nfft, subcarrier_spacing, velocity, carrier_freq);
-% 
-% % + noise
-% awgn_symbols = add_noise(TDLa_signal, snr);
-% 
-% %CP Discard
-% %unravel
-% awgn_symbols = reshape(awgn_symbols', [], symbols_count)';
-% no_cp_symbols = awgn_symbols(:, 73:end);
-% 
-% received = fftshift(fft(no_cp_symbols, [], 2));
-% 
-% %equalization
-% noise_power = 10.^(-snr./10);
-% h_ls = (received(1, :) .* conj(pilot_symbol));
-% W_mmse = conj(h_ls) ./ (h_ls .* conj(h_ls) + noise_power);
-% equalized_received = received .* W_mmse;
-% 
-% R_matr = covariance_matrix(Nfft, cp_len, Nfft);
-% R = R_matr / (R_matr + noise_power * eye(Nfft));
-% 
-% h_lmmse = received(1, :) * R;
-% W_lmmse = conj(h_lmmse) ./ (h_lmmse .* conj(h_lmmse) + noise_power);
-% equalized_received2 = received .* W_lmmse .* exp(1i .* pi ./ 4);
-% 
-% 
-% %Plots
-% figure;
-% scatter(real(received), imag(received), 'red');
-% hold on;
-% scatter(real(equalized_received), imag(equalized_received), 'blue');
-% scatter(real(equalized_received2), imag(equalized_received2), 'green');
-% grid on;
-% legend('received', 'equlized', 'equalized-lmmse');
+cp_ifft_symbols =                          reshape(cp_ifft_symbols', [], 1)'; %ravel
+[TDLa_signal, impulse_res, delays_sampl] = TDLa(cp_ifft_symbols, delay_spread, Nfft, subcarrier_spacing, velocity, carrier_freq, symbols_count);
 
+% + noise
+awgn_symbols =                             add_noise(TDLa_signal, snr);
+
+%CP Discard
+%unravel
+awgn_symbols =                             reshape(awgn_symbols', [], symbols_count)';
+no_cp_symbols =                            awgn_symbols(:, 73:end);
+
+received =                                 fftshift(fft(no_cp_symbols, [], 2));
+
+%equalization
+noise_power =                              10.^(-snr./10);
+h_ls =                                     (received(1,:) .* conj(pilot_symbol));
+
+W_mmse =                                   conj(h_ls) ./ (h_ls .* conj(h_ls) + noise_power);
+
+equalized_received =                       received(:,:) .* W_mmse;%.* exp(1i .* pi ./ 4);
+
+R_matr =                                   covariance_matrix(Nfft, cp_len, Nfft);
+R =                                        R_matr / (R_matr + noise_power * eye(Nfft));
+
+h_lmmse =                                  received(1, :) * R;
+
+W_lmmse =                                  conj(h_lmmse) ./ (h_lmmse .* conj(h_lmmse) + noise_power);
+
+equalized_received2 =                      received(:, :) .* W_lmmse .* exp(1i .* pi ./ 4);
+
+%Plots
+figure;
+%scatter(real(received), imag(received), 'red');
+scatter(real(equalized_received(:, 117:792+116)), imag(equalized_received(:, 117:792+116)), 'blue');
+hold on;
+scatter(real(qam_symbols(116+1:792+116)), imag(qam_symbols(116+1:792+116)),'red');
+
+scatter(real(equalized_received2(116+1:792+116)), imag(equalized_received2(116+1:792+116)), 'green');
+
+grid on;
+%legend('received', 'equlized-ls', 'equalized-lmmse');
+%figure; plot_spectrum2(cp_ifft_symbols(1, :), Fs, "red", length(cp_ifft_symbols(1, :)));
 
 %% -----------------------Functions----------------------- %%
+function plot_spectrum2(signal, fs, colour, N)
+    grid on;
+    f = (-N/2:N/2-1) * (fs / N);
+    spectrum = fftshift(fft(signal, [], 2));
+    plot(f, 20*log10(spectrum), color = colour);
+    xlabel('Frequency, Hz');
+    ylabel('Magnitude, dB');
+    xlim([-fs/2, fs/2]);
+    hold on;
+end
+
+function bpsk_out = bpsk_modulate(x)
+    bpsk_out = 1./sqrt(2) .* ((1-2*x(1:end)) + 1j .* (1-2*x(1:end)));
+end
+
 function qpsk_out = qpsk_modulate(x)
-    %return 1/np.sqrt(2) * ((1-2*data_bits[0::2]) + 1j*(1-2*data_bits[1::2])) #TS 38.211 - 5.1.3
     qpsk_out =  1./sqrt(2) .* (1-2*x(1:2:end) + 1j * (1-2*x(2:2:end)));
 end
 
-function noise_added = add_noise(signal, SNR)
-    noise_added = awgn(signal, SNR);
+function qam16_out = qam16_modulate(x)
+    qam16_out = 1./sqrt(10) .* ( (1-2.*x(1:4:end)) .* (2-(1-2.*x(3:4:end))) + 1j .* (1-2.*x(2:4:end)) .* (2-(1-2*x(4:4:end))) );
 end
 
-function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spread, Nfft, subcarrier_spacing, velocity, carrier_freq)
-    delays_ns = [0 .3819 .4025 .5868 .4610 .5375 .6708] .* delay_spread;
-    powers_db = [-13 0 -2.2 -4 -6 -8.2 -9.9];
-  
-    powers_linear = 10 .^ (powers_db ./ 10);
-    powers_linear = powers_linear ./ sum(powers_linear);
-    sample_rate = Nfft .* subcarrier_spacing;
-    Ts = 1 / sample_rate; % период дискретизации
-    delays_samples = cast(round(delays_ns .* sample_rate / 1e9), 'int32');
-        
-    num_samples = length(signal);
-    num_taps = length(delays_samples);
+function qam64_out = qam64_modulate(x)
+    qam64_out = 1/sqrt(42) .* ( (1-2*x(1:6:end)) .* ( 4 - (1 - 2*x(3:6:end)).*(2 - (1 - 2*x(5:6:end))) ) + 1j * (1 - 2*x(2:6:end)) .* (4 - (1 - 2*x(4:6:end)) .* (2 - (1 - 2*x(6:6:end)))) );
+end
+
+function out = bits_to_complex(symbs_count, nfft, num_subcarrier, modulation_technique)
+    modulations =                                   ["BPSK", "QPSK", "", "16QAM","", "64QAM"];
+    scale_var =                                     find(modulations == modulation_technique);
+    x_count =                                       nfft * symbs_count * scale_var; % число бит
+    x =                                             randi([0, 1], 1, x_count);
+    out =                                           zeros(1, symbs_count .* nfft);
+    switch scale_var
+        case 1
+            modulate =                              @bpsk_modulate;
+        case 2
+            modulate =                              @qpsk_modulate;
+        case 4
+            modulate =                              @qam16_modulate;
+        case 6
+            modulate =                              @qam64_modulate;
+    end
+    for iterable = 1:symbs_count
+        x_use =                                     x(iterable*scale_var*nfft - scale_var*nfft + scale_var*num_subcarrier + 1:iterable*scale_var*nfft - scale_var * num_subcarrier);
+        %symbol =                                    x(iterable*scale_var*nfft-scale_var*nfft+1:iterable*scale_var*nfft);
+        modulated =                                 modulate(x_use);
+        out(iterable*nfft-nfft+1:iterable*nfft) =   [zeros(1, num_subcarrier), modulated, zeros(1, num_subcarrier)];
+    end
+end
+
+function noise_added = add_noise(signal, SNR)
+    noise_power = 10 .^ (-SNR./10);
+    %noise = np.sqrt(noise_power / 2) * (np.random.normal(size=signal.shape) + 1j * np.random.normal(size=signal.shape))
+    %return signal + noise
+    noise = sqrt(noise_power ./ 2) .* (randn(size(signal)) + 1j .* randn(size(signal)));
+    %noise_added = awgn(signal, SNR);
+    noise_added = signal + noise;
+end
+
+function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spread, Nfft, subcarrier_spacing, velocity, carrier_freq, num_symbs)
+    delays_ns =             [0 .3819 .4025 .5868 .4610 .5375 .6708] .* delay_spread;
+    powers_db =             [-13 0 -2.2 -4 -6 -8.2 -9.9];
+    powers_linear =         10 .^ (powers_db ./ 10);
+    %powers_linear =         powers_linear ./ sum(powers_linear);
+    sample_rate =           Nfft .* subcarrier_spacing;
+    Ts =                    1 / sample_rate; % symbol time
+    delays_samples =        cast(round(delays_ns .* sample_rate / 1e9), 'int32');
     
-    % Доплеровская частота
-    c = 3e8; % скорость света
-    % New model (N = 12)
-    N = [1 2 3 4 5 6 7 8 9 10 11 12];
-    N0 = length(N) / 4;
-    alpha_n = N.*(2.*pi./length(N));
-    beta_n = N(1:N0).*pi./N0;
-    omega_m = 2.*pi.*carrier_freq.*velocity./c; % maximum Doppler shift;
-    omega_n = omega_m .* cos(alpha_n);
+    % ЧАСТОТА ДИСКРЕТИЗАЦИИ КАНАЛА должна быть >= частоты Доплера
+    f_d =                   (velocity .* carrier_freq) ./ (3*1e8);  % исправлено: 3e8, а не 3*10e8
+    fs_channel =            max(10 * f_d, 1000);  % минимум 10*f_d, но не менее 1 кГц
+
+    num_samples =           length(signal);
+    num_taps =              length(delays_samples);
+    time_process =          num_samples / sample_rate; % время прохождения сигнала через канал
+    num_channel_samples =   ceil(time_process * fs_channel);
+    t_channel =             (0:num_channel_samples-1) / fs_channel;
     
-    channel_taps_history = zeros(num_taps, num_samples);
+    % Генерация доплеровских замираний (модель Джейкса)
+    N0 =                    5; % число синусоид
+    beta =                  pi * (1:N0) / N0;
+    alpha =                 (1:N0) * (2*pi/N0);
     
-    t = (0:num_samples-1) * Ts;
+    channel_taps_history =  zeros(num_taps, num_channel_samples);
     
+    % Генерация ОДНОГО процесса замираний для всех тапов (но с разными фазами)
     for x = 1:num_taps
-        waveform = 0;
-        T_t = zeros(1, length(t));
-        for g = 1:length(t)
-            waveform = 0;
-            theta_n = 2.*pi.*rand(1, 3);
-            for i = 1:N0
-                waveform = waveform + sqrt(2./N0) .* (cos(beta_n(i)) + 1j.*sin(beta_n(i)));%.*cos(omega_n(i) + theta_n(i));
-            end
-            T_t(g) = waveform .* cos(sum(omega_n).*t(g) + sum(theta_n));       
+        in_phase =  zeros(1, num_channel_samples);
+        quadrture = zeros(1, num_channel_samples);
+        
+        for n = 1:N0
+            omega_n =     2*pi*f_d * cos(alpha(n));
+            phase_shift = 2*pi*rand();  % случайная фаза для каждого тапа
+            in_phase =    in_phase + cos(beta(n) + phase_shift) .* cos(omega_n * t_channel);
+            quadrture =   quadrture + sin(beta(n) + phase_shift) .* cos(omega_n * t_channel);
         end
         
-        % Базовый коэффициент тапа + доплеровская модуляция
-        base_tap = sqrt(powers_linear(i)) * (randn(1, 1) + 1j * randn(1, 1)) / sqrt(2);
-        channel_taps_history(x, :) = base_tap .* T_t;
+        fading =    (in_phase + 1j * quadrture) / sqrt(N0);
+        
+        % Базовый коэффициент тапа
+        base_tap =                   sqrt(powers_linear(x)/2) * (randn(1,1) + 1j * randn(1,1));
+        channel_taps_history(x, :) = base_tap .* fading;
     end
     
-    % Свёртка с изменяющимся каналом
+    % При v=0 убедимся, что канал постоянен
+    % if velocity == 0
+    %     for x = 1:num_taps
+    %         channel_taps_history(x, :) = channel_taps_history(x, 1);  % все отсчеты одинаковые
+    %     end
+    % end
+    max_lag = 70; % samples
+    autocorr(max_lag, channel_taps_history(1, :), time_process, num_symbs, sample_rate, fs_channel, f_d, velocity, N0);
+    
+    % ====== ИСПРАВЛЕННАЯ СВЕРТКА ======
     output_signal = zeros(1, num_samples);
     max_delay = max(delays_samples);
     
-    for n = 1:num_samples
-        % Импульсная характеристика для текущего момента времени
-        impulse_response = zeros(1, max_delay + 1);
+    samples_per_channel_sample = round(sample_rate / fs_channel);
+    
+    fprintf('Информация о дискретизации:\n');
+    fprintf('  Частота дискретизации сигнала: %.2f Гц\n', sample_rate);
+    fprintf('  Частота обновления канала: %.2f Гц\n', fs_channel);
+    fprintf('  1 отсчет канала используется для %.0f отсчетов сигнала\n', samples_per_channel_sample);
+    
+    for n_signal = 1:num_samples
+        % 1. Определяем, какой отсчет канала использовать
+        % Время текущего отсчета сигнала:
+        t_signal = (n_signal - 1) / sample_rate;
         
-        for i = 1:num_taps
-            delay = delays_samples(i);
-            if delay + 1 <= length(impulse_response)
-                impulse_response(delay + 1) = impulse_response(delay + 1) + channel_taps_history(i, n);
+        % Индекс отсчета канала для этого времени:
+        n_channel = floor(t_signal * fs_channel) + 1;
+        n_channel = min(n_channel, num_channel_samples); % защита от выхода за границы
+        
+        current_output = 0;
+        
+        % 2. Свертка с текущим каналом
+        for tap_idx = 1:num_taps
+            delay = delays_samples(tap_idx);
+            
+            if n_signal > delay  % проверка, что не выходим за границы
+                % Берём значение тапа для текущего момента времени
+                tap_value = channel_taps_history(tap_idx, n_channel);
+                
+                % Берём отсчет сигнала с соответствующей задержкой
+                signal_value = signal(n_signal - delay);
+                
+                current_output = current_output + tap_value * signal_value;
             end
         end
         
-        % Свёртка для текущего отсчёта
-        if n <= length(impulse_response)
-            segment = signal(1:n);
-            ir_segment = impulse_response(1:n);
-            output_signal(n) = sum(segment .* fliplr(ir_segment));
-        else
-            segment_start = n - length(impulse_response) + 1;
-            segment_end = n;
-            segment = signal(segment_start:segment_end);
-            output_signal(n) = sum(segment .* fliplr(impulse_response));
-        end
+        output_signal(n_signal) = current_output;
+    end
+end
+
+function plot_autocorr = autocorr(max_lag, process, time_process, num_symbs, sample_rate, fs_channel, f_d, velocity, N0)
+    lags = 0:max_lag-1;
+    corr = zeros(1, max_lag);
+    N = length(process);
+    for k = 1:max_lag
+        idx = k - 1;
+        corr(k) = mean(process(1:N-idx) .* conj(process(1 + idx:N)));
+    end
+    time_lags = lags ./ sample_rate;
+    figure;
+    corr = corr ./ max(corr);
+    tau = (0:max_lag-1) ./ fs_channel;
+    J = besselj(0, 2*pi*f_d*tau);
+    %J = J ./ max(J);
+    plot(time_lags .*1e5, corr);
+    hold on;
+    plot(time_lags .*1e5, J);
+    xlabel('Сдвиг, мкс');
+    ylabel('корр(сдвиг)');
+    T = get_correlation_time_simple(corr, J, sample_rate) *1e5;
+    title(sprintf('время процесса %.6f c (%.i символов)', time_process, num_symbs), sprintf('скорость приемника = %.2f км/ч, число синусоид = %d, время корреляции = %.2f мкс', velocity .*3600./1000, N0, T) );
+    legend('вычисляемая акф', 'ф-я Бесселя 0 порядка')
+    grid on;
+end
+
+function T_corr = get_correlation_time_simple(signal1, signal2, fs)
+    % Нормализованная кросс-корреляция
+    x1 = signal1 - mean(signal1);
+    x2 = signal2 - mean(signal2);
+    [corr_vals, ~] = xcorr(x1, x2, 'normalized');
+    
+    center_idx = ceil(length(corr_vals)/2);
+    corr_peak = corr_vals(center_idx);
+    
+    threshold = abs(corr_peak) * 0.2;
+    right_side = abs(corr_vals(center_idx:end));
+    
+    % Находим первый индекс ниже порога
+    idx = find(right_side < threshold, 1);
+    
+    if isempty(idx)
+        T_corr = length(signal1)/fs;  % если не упало ниже порога
+    else
+        T_corr = (idx - 1) / fs;
     end
 end
 
