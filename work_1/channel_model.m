@@ -123,10 +123,7 @@ end
 
 function noise_added = add_noise(signal, SNR)
     noise_power = 10 .^ (-SNR./10);
-    %noise = np.sqrt(noise_power / 2) * (np.random.normal(size=signal.shape) + 1j * np.random.normal(size=signal.shape))
-    %return signal + noise
     noise = sqrt(noise_power ./ 2) .* (randn(size(signal)) + 1j .* randn(size(signal)));
-    %noise_added = awgn(signal, SNR);
     noise_added = signal + noise;
 end
 
@@ -139,9 +136,8 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     Ts =                    1 / sample_rate; % symbol time
     delays_samples =        cast(round(delays_ns .* sample_rate / 1e9), 'int32');
     
-    % ЧАСТОТА ДИСКРЕТИЗАЦИИ КАНАЛА должна быть >= частоты Доплера
-    f_d =                   (velocity .* carrier_freq) ./ (3*1e8);  % исправлено: 3e8, а не 3*10e8
-    fs_channel =            max(10 * f_d, 1000);  % минимум 10*f_d, но не менее 1 кГц
+    f_d =                   (velocity .* carrier_freq) ./ (3*1e8);
+    fs_channel =            max(10 * f_d, 1000);
 
     num_samples =           length(signal);
     num_taps =              length(delays_samples);
@@ -149,14 +145,12 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     num_channel_samples =   ceil(time_process * fs_channel);
     t_channel =             (0:num_channel_samples-1) / fs_channel;
     
-    % Генерация доплеровских замираний (модель Джейкса)
     N0 =                    5; % число синусоид
     beta =                  pi * (1:N0) / N0;
     alpha =                 (1:N0) * (2*pi/N0);
     
     channel_taps_history =  zeros(num_taps, num_channel_samples);
     
-    % Генерация ОДНОГО процесса замираний для всех тапов (но с разными фазами)
     for x = 1:num_taps
         in_phase =  zeros(1, num_channel_samples);
         quadrture = zeros(1, num_channel_samples);
@@ -175,16 +169,9 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
         channel_taps_history(x, :) = base_tap .* fading;
     end
     
-    % При v=0 убедимся, что канал постоянен
-    % if velocity == 0
-    %     for x = 1:num_taps
-    %         channel_taps_history(x, :) = channel_taps_history(x, 1);  % все отсчеты одинаковые
-    %     end
-    % end
     max_lag = 70; % samples
     autocorr(max_lag, channel_taps_history(1, :), time_process, num_symbs, sample_rate, fs_channel, f_d, velocity, N0);
     
-    % ====== ИСПРАВЛЕННАЯ СВЕРТКА ======
     output_signal = zeros(1, num_samples);
     max_delay = max(delays_samples);
     
@@ -196,11 +183,11 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     fprintf('  1 отсчет канала используется для %.0f отсчетов сигнала\n', samples_per_channel_sample);
     
     for n_signal = 1:num_samples
-        % 1. Определяем, какой отсчет канала использовать
-        % Время текущего отсчета сигнала:
+        % определяем, какой отсчет канала использовать
+        % время текущего отсчета сигнала:
         t_signal = (n_signal - 1) / sample_rate;
         
-        % Индекс отсчета канала для этого времени:
+        % индекс отсчета канала для этого времени
         n_channel = floor(t_signal * fs_channel) + 1;
         n_channel = min(n_channel, num_channel_samples); % защита от выхода за границы
         
@@ -211,10 +198,10 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
             delay = delays_samples(tap_idx);
             
             if n_signal > delay  % проверка, что не выходим за границы
-                % Берём значение тапа для текущего момента времени
+                % берём значение тапа для текущего момента времени
                 tap_value = channel_taps_history(tap_idx, n_channel);
                 
-                % Берём отсчет сигнала с соответствующей задержкой
+                % берём отсчет сигнала с соответствующей задержкой
                 signal_value = signal(n_signal - delay);
                 
                 current_output = current_output + tap_value * signal_value;
@@ -251,7 +238,7 @@ function plot_autocorr = autocorr(max_lag, process, time_process, num_symbs, sam
 end
 
 function T_corr = get_correlation_time_simple(signal1, signal2, fs)
-    % Нормализованная кросс-корреляция
+    
     x1 = signal1 - mean(signal1);
     x2 = signal2 - mean(signal2);
     [corr_vals, ~] = xcorr(x1, x2, 'normalized');
@@ -262,7 +249,7 @@ function T_corr = get_correlation_time_simple(signal1, signal2, fs)
     threshold = abs(corr_peak) * 0.2;
     right_side = abs(corr_vals(center_idx:end));
     
-    % Находим первый индекс ниже порога
+    % находим первый индекс ниже порога
     idx = find(right_side < threshold, 1);
     
     if isempty(idx)
@@ -290,3 +277,4 @@ function R_hh = covariance_matrix(Nfft, T_cp, T_OFDM)
         end
     end
 end
+
