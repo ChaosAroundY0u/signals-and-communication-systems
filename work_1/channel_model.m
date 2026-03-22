@@ -1,23 +1,46 @@
-clear;
-close all;
 
 %% -----------------------Variables----------------------- %%
 Nfft =                                     1024;
-N_with_GI =                                792; % число поднесущих с учетом Guard Interval
-numSubcarrier =                            116;
-symbols_count =                            5;
+N_with_GI =                                1024; % число поднесущих с учетом Guard Interval
+numSubcarrier =                            0;
+symbols_count =                            50;
 cp_len =                                   72;
 delay_spread =                             500;
 subcarrier_spacing =                       120e3;
-snr =                                      70;
-velocity =                                 0 * 1000/3600;
+snr =                                      60;
+velocity =                                 60 * 1000/3600;
 carrier_freq =                             3.5e9;
 Fs =                                       Nfft * subcarrier_spacing;
+%коэффициенты полиномов идут слева направо, т.е.:
+g1 =                                       [1 0]; % 0*x + 1 или  вернее 1 + 0*x
+g2 =                                       [1 1]; % 1*x + 1 -/-/-/-/-/- 1 + 1*x
+%под знаком сложения подразумевается операция xor (сложение по модулю 2)
 %% -----------------------Main part----------------------- %%
 
-pilot_symbol =                             bits_to_complex(1, Nfft, numSubcarrier, "QPSK");
-qam_symbols =                              bits_to_complex(symbols_count-1, Nfft, numSubcarrier, "16QAM");
-qam_symbols =                              [pilot_symbol, qam_symbols];
+symb_counter =   0;
+pilots_counter = 0;
+symbols =       [];
+pilots =        [];
+while symb_counter < symbols_count
+    symbol = bits_to_complex(1, Nfft, numSubcarrier, "16QAM");
+    if mod(symb_counter, 10) == 0
+        symbol = bits_to_complex(1, Nfft, numSubcarrier, "QPSK");
+        pilots = [pilots, symbol];
+        pilots_counter = pilots_counter + 1;
+    end
+    symbols = [symbols, symbol];
+    symb_counter = symb_counter + 1;
+end
+
+pilots = reshape(pilots', [], pilots_counter)';
+
+%qpsk_symbols =                             bits_to_complex(symbols_count, Nfft, numSubcarrier, "QPSK");
+%pilot_symbol =                             bits_to_complex(1, Nfft, numSubcarrier, "QPSK", g1, g2);
+%pilot_symbol =                             bits_to_complex(1, Nfft, numSubcarrier, "QPSK");
+%qam_symbols =                              bits_to_complex(symbols_count-1, Nfft, numSubcarrier, "QPSK", g1, g2);
+%qam_symbols =                              bits_to_complex(symbols_count-1, Nfft, numSubcarrier, "16QAM");
+%qam_symbols =                              [pilot_symbol, qam_symbols];
+qam_symbols =                               symbols;
 
 %IFFT
 ifft_symbols =                             ifft(ifftshift(reshape(qam_symbols', [], symbols_count)'), [], 2);
@@ -41,29 +64,57 @@ received =                                 fftshift(fft(no_cp_symbols, [], 2));
 
 %equalization
 noise_power =                              10.^(-snr./10);
-h_ls =                                     (received(1,:) .* conj(pilot_symbol));
 
-W_mmse =                                   conj(h_ls) ./ (h_ls .* conj(h_ls) + noise_power);
+h_ls_estimates = [];
+for i = 1:pilots_counter
+    h_ls = received((i-1).*10+1, :) .* conj(pilots(i, :));
+    h_ls_estimates = [h_ls_estimates, h_ls];
+end
+h_ls_estimates = reshape(h_ls_estimates', [], pilots_counter)';
+h_ls =                                     (received(1,:) .* conj(pilots(1,:))); %conj(pilot_symbol));
 
-equalized_received =                       received(:,:) .* W_mmse;%.* exp(1i .* pi ./ 4);
+W_mmse =                                   conj(h_ls_estimates) ./ (h_ls_estimates .* conj(h_ls_estimates) + noise_power);
+equalized_received = [];
+for i = 1:symbols_count
+    estimate = W_mmse(fix((i-1) / 10) + 1, :);
+    equalized = received(i, :) .* estimate;
+    equalized_received = [equalized_received; equalized];
+end
+
+%equalized_received =                       received(:,:) .* W_mmse;%.* exp(1i .* pi ./ 4);
 
 R_matr =                                   covariance_matrix(Nfft, cp_len, Nfft);
 R =                                        R_matr / (R_matr + noise_power * eye(Nfft));
 
-h_lmmse =                                  received(1, :) * R;
-
+h_lmmse =                                  h_ls_estimates * R;
 W_lmmse =                                  conj(h_lmmse) ./ (h_lmmse .* conj(h_lmmse) + noise_power);
 
-equalized_received2 =                      received(:, :) .* W_lmmse .* exp(1i .* pi ./ 4);
+%equalized_received2 =                      received(:, :) .* W_lmmse;
+equalized_received2 = [];
+for i = 1:symbols_count
+    estimate = W_lmmse(fix((i-1) / 10) + 1, :);
+    equalized = received(i, :) .* estimate;
+    equalized_received2 = [equalized_received2; equalized];
+end
 
+H_interp = interp_estimate(h_ls_estimates, symbols_count, snr, Nfft, subcarrier_spacing, velocity, carrier_freq);
+
+equalized_received3 = [];
+for i = 1:symbols_count
+    equalized3 = received(i, :) ./ H_interp(i, :);
+    equalized_received3 = [equalized_received3; equalized3];
+end
 %Plots
 figure;
-%scatter(real(received), imag(received), 'red');
+%scatter(real(received(:, 117:792+116)), imag(received(:, 117:792+116)), 'red');
+hold on;
 scatter(real(equalized_received(:, 117:792+116)), imag(equalized_received(:, 117:792+116)), 'blue');
 hold on;
-scatter(real(qam_symbols(116+1:792+116)), imag(qam_symbols(116+1:792+116)),'red');
+%scatter(real(qam_symbols(116+1:792+116)), imag(qam_symbols(116+1:792+116)),'red');
 
-scatter(real(equalized_received2(116+1:792+116)), imag(equalized_received2(116+1:792+116)), 'green');
+scatter(real(equalized_received2(:, 116+1:792+116)), imag(equalized_received2(:, 116+1:792+116)), 'green');
+hold on;
+scatter(real(equalized_received3(:, 116+1:792+116)), imag(equalized_received3(:, 116+1:792+116)), 'magenta');
 
 grid on;
 %legend('received', 'equlized-ls', 'equalized-lmmse');
@@ -102,6 +153,10 @@ function out = bits_to_complex(symbs_count, nfft, num_subcarrier, modulation_tec
     scale_var =                                     find(modulations == modulation_technique);
     x_count =                                       nfft * symbs_count * scale_var; % число бит
     x =                                             randi([0, 1], 1, x_count);
+    %coded_bits_per_symbol =                         nfft*scale_var*2+2;
+    %[x, coded_bits] =                               conv_encoder(x, g1, g2);
+    %x =                                             [x, zeros(1, symbs_count * coded_bits_per_symbol - coded_bits)];
+    %out =                                           [zeros(1, (symbs_count .* nfft) * 2 + 1*(symbs_count-1) + 1), zeros(1, symbs_count * coded_bits_per_symbol - coded_bits)];
     out =                                           zeros(1, symbs_count .* nfft);
     switch scale_var
         case 1
@@ -114,16 +169,21 @@ function out = bits_to_complex(symbs_count, nfft, num_subcarrier, modulation_tec
             modulate =                              @qam64_modulate;
     end
     for iterable = 1:symbs_count
+        %x_use =                                     x(((iterable*scale_var*nfft) - (scale_var*nfft + scale_var*num_subcarrier))*2+ 2*(iterable-1) + 1:(iterable*scale_var*nfft - scale_var * num_subcarrier)*2+2*iterable);
         x_use =                                     x(iterable*scale_var*nfft - scale_var*nfft + scale_var*num_subcarrier + 1:iterable*scale_var*nfft - scale_var * num_subcarrier);
         %symbol =                                    x(iterable*scale_var*nfft-scale_var*nfft+1:iterable*scale_var*nfft);
         modulated =                                 modulate(x_use);
+        %out((iterable*nfft-nfft)*2 + 1*(iterable-1)+1:iterable*nfft*2 + 1*(iterable-1) + 1) =   [zeros(1, num_subcarrier), modulated, zeros(1, num_subcarrier)];
         out(iterable*nfft-nfft+1:iterable*nfft) =   [zeros(1, num_subcarrier), modulated, zeros(1, num_subcarrier)];
     end
 end
 
 function noise_added = add_noise(signal, SNR)
     noise_power = 10 .^ (-SNR./10);
+    %noise = np.sqrt(noise_power / 2) * (np.random.normal(size=signal.shape) + 1j * np.random.normal(size=signal.shape))
+    %return signal + noise
     noise = sqrt(noise_power ./ 2) .* (randn(size(signal)) + 1j .* randn(size(signal)));
+    %noise_added = awgn(signal, SNR);
     noise_added = signal + noise;
 end
 
@@ -133,11 +193,11 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     powers_linear =         10 .^ (powers_db ./ 10);
     %powers_linear =         powers_linear ./ sum(powers_linear);
     sample_rate =           Nfft .* subcarrier_spacing;
-    Ts =                    1 / sample_rate; % symbol time
     delays_samples =        cast(round(delays_ns .* sample_rate / 1e9), 'int32');
     
-    f_d =                   (velocity .* carrier_freq) ./ (3*1e8);
-    fs_channel =            max(10 * f_d, 1000);
+    % ЧАСТОТА ДИСКРЕТИЗАЦИИ КАНАЛА должна быть >= частоты Доплера
+    f_d =                   (velocity .* carrier_freq) ./ (3*1e8);  % исправлено: 3e8, а не 3*10e8
+    fs_channel =            max(10 * f_d, 1); 
 
     num_samples =           length(signal);
     num_taps =              length(delays_samples);
@@ -145,12 +205,14 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     num_channel_samples =   ceil(time_process * fs_channel);
     t_channel =             (0:num_channel_samples-1) / fs_channel;
     
+    % Генерация доплеровских замираний (модель Джейкса)
     N0 =                    5; % число синусоид
     beta =                  pi * (1:N0) / N0;
     alpha =                 (1:N0) * (2*pi/N0);
     
     channel_taps_history =  zeros(num_taps, num_channel_samples);
     
+    % Генерация ОДНОГО процесса замираний для всех тапов (но с разными фазами)
     for x = 1:num_taps
         in_phase =  zeros(1, num_channel_samples);
         quadrture = zeros(1, num_channel_samples);
@@ -169,9 +231,16 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
         channel_taps_history(x, :) = base_tap .* fading;
     end
     
+    % При v=0 убедимся, что канал постоянен
+    % if velocity == 0
+    %     for x = 1:num_taps
+    %         channel_taps_history(x, :) = channel_taps_history(x, 1);  % все отсчеты одинаковые
+    %     end
+    % end
     max_lag = 70; % samples
     autocorr(max_lag, channel_taps_history(1, :), time_process, num_symbs, sample_rate, fs_channel, f_d, velocity, N0);
     
+    % ====== ИСПРАВЛЕННАЯ СВЕРТКА ======
     output_signal = zeros(1, num_samples);
     max_delay = max(delays_samples);
     
@@ -183,11 +252,11 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
     fprintf('  1 отсчет канала используется для %.0f отсчетов сигнала\n', samples_per_channel_sample);
     
     for n_signal = 1:num_samples
-        % определяем, какой отсчет канала использовать
-        % время текущего отсчета сигнала:
+        % 1. Определяем, какой отсчет канала использовать
+        % Время текущего отсчета сигнала:
         t_signal = (n_signal - 1) / sample_rate;
         
-        % индекс отсчета канала для этого времени
+        % Индекс отсчета канала для этого времени:
         n_channel = floor(t_signal * fs_channel) + 1;
         n_channel = min(n_channel, num_channel_samples); % защита от выхода за границы
         
@@ -198,10 +267,10 @@ function [output_signal, powers_linear, delays_samples] = TDLa(signal, delay_spr
             delay = delays_samples(tap_idx);
             
             if n_signal > delay  % проверка, что не выходим за границы
-                % берём значение тапа для текущего момента времени
+                % Берём значение тапа для текущего момента времени
                 tap_value = channel_taps_history(tap_idx, n_channel);
                 
-                % берём отсчет сигнала с соответствующей задержкой
+                % Берём отсчет сигнала с соответствующей задержкой
                 signal_value = signal(n_signal - delay);
                 
                 current_output = current_output + tap_value * signal_value;
@@ -238,7 +307,7 @@ function plot_autocorr = autocorr(max_lag, process, time_process, num_symbs, sam
 end
 
 function T_corr = get_correlation_time_simple(signal1, signal2, fs)
-    
+    % Нормализованная кросс-корреляция
     x1 = signal1 - mean(signal1);
     x2 = signal2 - mean(signal2);
     [corr_vals, ~] = xcorr(x1, x2, 'normalized');
@@ -249,7 +318,7 @@ function T_corr = get_correlation_time_simple(signal1, signal2, fs)
     threshold = abs(corr_peak) * 0.2;
     right_side = abs(corr_vals(center_idx:end));
     
-    % находим первый индекс ниже порога
+    % Находим первый индекс ниже порога
     idx = find(right_side < threshold, 1);
     
     if isempty(idx)
@@ -278,3 +347,38 @@ function R_hh = covariance_matrix(Nfft, T_cp, T_OFDM)
     end
 end
 
+
+
+function H_interp = interp_estimate(estimates, num_symbs, snr, nfft, scs, velocity, carrier_freq)
+
+    pilot_indices = [1:10:num_symbs];
+    target_indices = [1:num_symbs];
+    snr_linear = 10^(snr/10);
+    sigma_square = 1 / snr_linear;
+    fd = (velocity .* carrier_freq) ./ (3*1e8);
+    sample_rate = nfft .* scs;
+    symb_time = nfft ./ sample_rate;
+
+    time_all = (0:num_symbs-1) * symb_time;
+    time_pilots = time_all(pilot_indices);
+    time_targets = time_all(target_indices);
+    
+    tau_pp = abs(time_pilots' - time_pilots);
+    R_pp = besselj(0, 2 * pi * fd * tau_pp);
+    R_pp = R_pp + sigma_square * eye(length(pilot_indices));
+
+    tau_tp = abs(time_targets' - time_pilots);
+    R_tp = besselj(0, 2 * pi * fd * tau_tp);
+    weights = R_tp / R_pp;
+
+    H_interp = [];
+    H_sum = 0;
+    for i = 1:num_symbs
+        for j = 1:size(weights, 2)
+            H = weights(i, j) .* estimates(j, :);
+            H_sum = H_sum + H;
+        end
+        H_interp = [H_interp; H_sum];
+        H_sum = 0;
+    end
+end
