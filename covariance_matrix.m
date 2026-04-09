@@ -1,5 +1,6 @@
 function R_hh = covariance_matrix(Nfft, T_cp, T_OFDM)
     alpha = T_cp ./ T_OFDM;
+    Nfft = 2.*Nfft;
     R_hh = zeros(Nfft);
     for k = 1:Nfft
         for m = 1:Nfft
