@@ -44,27 +44,6 @@ public:
             output_bits[2*i + 1] = b;
         }
     }
-    
-    // Кодирование с добавлением хвостовых нулей (6 битов для очистки регистра)
-    // Вход: input_bits - массив из n битов (0/1)
-    // Выход: output_bits - массив из 2*(n+6) битов (выделен caller'ом)
-    void encodeWithTail(const uint8_t* input_bits, int n, uint8_t* output_bits) {
-        // Кодируем исходные биты
-        for (int i = 0; i < n; i++) {
-            uint8_t a, b;
-            encodeBit(input_bits[i], a, b);
-            output_bits[2*i] = a;
-            output_bits[2*i + 1] = b;
-        }
-        
-        // Кодируем 6 хвостовых нулей для очистки регистра
-        for (int i = 0; i < 6; i++) {
-            uint8_t a, b;
-            encodeBit(0, a, b);
-            output_bits[2*(n + i)] = a;
-            output_bits[2*(n + i) + 1] = b;
-        }
-    }
 };
 
 
@@ -97,30 +76,18 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         input_bits[i] = (input_double[i] != 0) ? 1 : 0;
     }
     
-    // Параметр use_tail (опционально, по умолчанию 1 - добавлять хвостовые нули)
-    int use_tail = 1;
-    if (nrhs >= 2) {
-        use_tail = (int)mxGetScalar(prhs[1]);
-    }
-    
     // Сбрасываем кодер перед кодированием
     encoder.reset();
     
     // Кодируем
     int output_len;
     std::vector<uint8_t> output_bits;
+
+    // Без хвостовых нулей
+    output_len = 2 * n_bits;
+    output_bits.resize(output_len);
+    encoder.encode(input_bits.data(), n_bits, output_bits.data());
     
-    if (use_tail) {
-        // Добавляем 6 хвостовых нулей
-        output_len = 2 * (n_bits + 6);
-        output_bits.resize(output_len);
-        encoder.encodeWithTail(input_bits.data(), n_bits, output_bits.data());
-    } else {
-        // Без хвостовых нулей
-        output_len = 2 * n_bits;
-        output_bits.resize(output_len);
-        encoder.encode(input_bits.data(), n_bits, output_bits.data());
-    }
     
     // Создаем выходной массив
     plhs[0] = mxCreateDoubleMatrix(1, output_len, mxREAL);
