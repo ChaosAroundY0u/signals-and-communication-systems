@@ -94,15 +94,11 @@ public:
             for (int state = 0; state < NUM_STATES; state++) {
                 if (metrics[state] == INT_MAX) continue;
                 
-                // Только input_bit = 0 разрешен на хвостовых шагах!
                 int input_bit = 0;
                 int next_state = getNextState(state, input_bit);
                 uint8_t expected = expected_output[state][input_bit];
                 
-                // Для хвоста мы не получаем реальных символов
-                // Поэтому используем "нулевое" расстояние (не наказываем)
-                // или можно использовать полученные символы, если они есть
-                int distance = 0; // Нет наказания, просто следуем пути
+                int distance = 0;
                 int new_metric = metrics[state] + distance;
                 
                 if (new_metric < next_metrics[next_state]) {
