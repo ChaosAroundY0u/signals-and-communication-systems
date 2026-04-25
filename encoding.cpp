@@ -13,14 +13,12 @@ private:
         // Сдвиг регистра и добавление нового бита
         shift_register = ((shift_register << 1) | input_bit) & 0x7F;
         
-        // Выход A (полином 133) - исправленная версия
         out_a = (
             ((shift_register >> 6) & 1) ^ ((shift_register >> 4) & 1) ^
             ((shift_register >> 3) & 1) ^ ((shift_register >> 1) & 1) ^
             ((shift_register >> 0) & 1)
         );
         
-        // Выход B (полином 171) - исправленная версия
         out_b = (
             ((shift_register >> 6) & 1) ^ ((shift_register >> 5) & 1) ^
             ((shift_register >> 4) & 1) ^ ((shift_register >> 3) & 1) ^
@@ -33,7 +31,6 @@ public:
         shift_register = 0;
     }
     
-    // Кодирование последовательности битов (для MEX)
     // Вход: input_bits - массив из n битов (0/1)
     // Выход: output_bits - массив из 2*n битов (выделен caller'ом)
     void encode(const uint8_t* input_bits, int n, uint8_t* output_bits) {
@@ -83,7 +80,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     int output_len;
     std::vector<uint8_t> output_bits;
 
-    // Без хвостовых нулей
     output_len = 2 * n_bits;
     output_bits.resize(output_len);
     encoder.encode(input_bits.data(), n_bits, output_bits.data());
